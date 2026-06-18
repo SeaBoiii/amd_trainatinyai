@@ -1,52 +1,67 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        ember: {
-          50: "#fff1ed",
-          200: "#ffb499",
-          400: "#ff6234",
-          500: "#f2431e",
-          700: "#9f2a12",
-          900: "#3d110a"
+        // AMD-inspired palette (not official AMD branding)
+        amd: {
+          red: '#ED1C24',
+          orange: '#FF6B00',
+          amber: '#FFA500',
+          dark: '#0A0E14',
+          panel: '#121821',
+          panel2: '#1A2230',
+          line: '#27313F',
         },
-        coal: {
-          900: "#06080d",
-          800: "#10151f",
-          700: "#1a2232"
-        },
-        ice: "#f8faff"
       },
       fontFamily: {
-        display: ["Space Grotesk", "ui-sans-serif", "system-ui"],
-        body: ["Manrope", "ui-sans-serif", "system-ui"]
+        display: ['"Segoe UI"', 'system-ui', 'Avenir', 'Helvetica', 'Arial', 'sans-serif'],
       },
       boxShadow: {
-        glow: "0 0 0 1px rgba(255,98,52,0.3), 0 0 30px rgba(255,98,52,0.2)",
-        panel: "0 20px 40px rgba(0,0,0,0.35)"
+        glow: '0 0 24px rgba(237, 28, 36, 0.35)',
+        'glow-orange': '0 0 28px rgba(255, 107, 0, 0.40)',
+        card: '0 10px 40px rgba(0, 0, 0, 0.45)',
       },
       keyframes: {
-        pulseCore: {
-          "0%, 100%": { transform: "scale(1)", opacity: "0.7" },
-          "50%": { transform: "scale(1.16)", opacity: "1" }
+        floaty: {
+          '0%, 100%': { transform: 'translateY(0px)' },
+          '50%': { transform: 'translateY(-10px)' },
         },
-        rise: {
-          from: { opacity: "0", transform: "translateY(10px)" },
-          to: { opacity: "1", transform: "translateY(0)" }
+        pulseGlow: {
+          '0%, 100%': { boxShadow: '0 0 18px rgba(255,107,0,0.35)' },
+          '50%': { boxShadow: '0 0 42px rgba(255,107,0,0.75)' },
         },
-        shimmer: {
-          from: { backgroundPosition: "0% 0%" },
-          to: { backgroundPosition: "200% 0%" }
-        }
+        spinSlow: {
+          to: { transform: 'rotate(360deg)' },
+        },
+        sweep: {
+          '0%': { transform: 'translateX(-120%)' },
+          '100%': { transform: 'translateX(120%)' },
+        },
+        fadeUp: {
+          '0%': { opacity: '0', transform: 'translateY(14px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        ping2: {
+          '0%': { transform: 'scale(1)', opacity: '0.7' },
+          '100%': { transform: 'scale(2.2)', opacity: '0' },
+        },
+        gridmove: {
+          '0%': { backgroundPosition: '0 0' },
+          '100%': { backgroundPosition: '40px 40px' },
+        },
       },
       animation: {
-        pulseCore: "pulseCore 2s ease-in-out infinite",
-        rise: "rise .5s ease-out both",
-        shimmer: "shimmer 2.4s linear infinite"
-      }
-    }
+        floaty: 'floaty 4s ease-in-out infinite',
+        pulseGlow: 'pulseGlow 2.4s ease-in-out infinite',
+        spinSlow: 'spinSlow 8s linear infinite',
+        sweep: 'sweep 2s ease-in-out infinite',
+        fadeUp: 'fadeUp 0.5s ease-out both',
+        ping2: 'ping2 2s ease-out infinite',
+        gridmove: 'gridmove 6s linear infinite',
+      },
+    },
   },
-  plugins: []
+  plugins: [],
 };

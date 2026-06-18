@@ -1,53 +1,69 @@
-import { VisitorResult } from "../types";
+import type { VisitorResult } from '../types';
 
-const VISITOR_WALL_KEY = "tiny-ai-visitor-wall";
-const SETTINGS_KEY = "tiny-ai-settings";
+const WALL_KEY = 'tinyai.visitorWall.v1';
+const PREFS_KEY = 'tinyai.prefs.v1';
 
-export interface AppSettings {
+/** Visitor-facing booth preferences that should persist between visitors. */
+export interface BoothPrefs {
   presenterMode: boolean;
   reducedMotion: boolean;
 }
 
+const DEFAULT_PREFS: BoothPrefs = {
+  presenterMode: false,
+  reducedMotion: false,
+};
+
+/** Reads the saved Visitor Wall, newest first. Never throws. */
 export function loadVisitorWall(): VisitorResult[] {
   try {
-    const raw = localStorage.getItem(VISITOR_WALL_KEY);
-    if (!raw) {
-      return [];
-    }
-    return JSON.parse(raw) as VisitorResult[];
+    const raw = localStorage.getItem(WALL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as VisitorResult[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.sort((a, b) => b.createdAt - a.createdAt);
   } catch {
     return [];
   }
 }
 
+/** Adds a result to the Visitor Wall and returns the updated list. */
 export function saveVisitorResult(result: VisitorResult): VisitorResult[] {
-  const wall = loadVisitorWall();
-  const updated = [result, ...wall].slice(0, 100);
-  localStorage.setItem(VISITOR_WALL_KEY, JSON.stringify(updated));
+  const current = loadVisitorWall();
+  const updated = [result, ...current].slice(0, 100); // cap stored entries
+  try {
+    localStorage.setItem(WALL_KEY, JSON.stringify(updated));
+  } catch {
+    // Storage might be full or blocked; fail quietly so the booth keeps working.
+  }
   return updated;
 }
 
+/** Clears every entry from the Visitor Wall. */
 export function clearVisitorWall(): void {
-  localStorage.removeItem(VISITOR_WALL_KEY);
-}
-
-export function loadSettings(): AppSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) {
-      return { presenterMode: false, reducedMotion: false };
-    }
-
-    const parsed = JSON.parse(raw) as AppSettings;
-    return {
-      presenterMode: Boolean(parsed.presenterMode),
-      reducedMotion: Boolean(parsed.reducedMotion)
-    };
+    localStorage.removeItem(WALL_KEY);
   } catch {
-    return { presenterMode: false, reducedMotion: false };
+    // Ignore.
   }
 }
 
-export function saveSettings(settings: AppSettings): void {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+/** Loads persisted booth preferences, falling back to defaults. */
+export function loadPrefs(): BoothPrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return { ...DEFAULT_PREFS };
+    return { ...DEFAULT_PREFS, ...(JSON.parse(raw) as Partial<BoothPrefs>) };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+/** Persists booth preferences. */
+export function savePrefs(prefs: BoothPrefs): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // Ignore.
+  }
 }

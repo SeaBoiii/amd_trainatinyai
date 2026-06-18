@@ -1,33 +1,60 @@
-import { CareerMatch } from "../types";
+import type { CareerMatch, SessionStats } from '../types';
 
-export interface CareerSignals {
-  examplesTaught: number;
-  accuracy: number;
-  viewedHardware: boolean;
-  improvementCount: number;
-  missionsTried: number;
-}
+export const CAREERS: Record<string, CareerMatch> = {
+  ml_engineer: {
+    id: 'ml_engineer',
+    title: 'Machine Learning Engineer',
+    emoji: '🛠️',
+    blurb: 'You love feeding an AI lots of examples and building it up. That is exactly what ML engineers do.',
+  },
+  ai_researcher: {
+    id: 'ai_researcher',
+    title: 'AI Researcher',
+    emoji: '🔬',
+    blurb: 'You got your AI to be impressively accurate. Researchers explore how to make AI smarter.',
+  },
+  hardware_engineer: {
+    id: 'hardware_engineer',
+    title: 'AI Hardware Engineer',
+    emoji: '⚙️',
+    blurb: 'You dug into how chips power AI. Hardware engineers design the CPUs, GPUs, and AI engines that make it all run.',
+  },
+  data_scientist: {
+    id: 'data_scientist',
+    title: 'Data Scientist',
+    emoji: '📊',
+    blurb: 'You kept improving the AI by giving it better data. Data scientists turn data into smarter decisions.',
+  },
+  stem_innovator: {
+    id: 'stem_innovator',
+    title: 'STEM Innovator',
+    emoji: '🚀',
+    blurb: 'You explored lots of different missions. Innovators love trying many ideas to see what works.',
+  },
+};
 
-export function getCareerMatch(signals: CareerSignals): CareerMatch {
-  if (signals.missionsTried >= 2) {
-    return "STEM Innovator";
+/**
+ * Picks a career based on how the visitor used the activity.
+ * Priority order is chosen so the "most impressive" behaviour wins, while
+ * always returning a friendly result.
+ */
+export function matchCareer(stats: SessionStats): CareerMatch {
+  // Tried several missions -> innovator
+  if (stats.missionsTried >= 2) {
+    return CAREERS.stem_innovator;
   }
-
-  if (signals.viewedHardware) {
-    return "AI Hardware Engineer";
+  // Used the improvement loop a lot -> data scientist
+  if (stats.improvementsUsed >= 2) {
+    return CAREERS.data_scientist;
   }
-
-  if (signals.improvementCount >= 2) {
-    return "Data Scientist";
+  // Explored hardware screen -> hardware engineer
+  if (stats.exploredHardware) {
+    return CAREERS.hardware_engineer;
   }
-
-  if (signals.accuracy >= 85) {
-    return "AI Researcher";
+  // High accuracy with at least a few predictions -> researcher
+  if (stats.accuracy >= 0.8 && stats.predictionsMade >= 2) {
+    return CAREERS.ai_researcher;
   }
-
-  if (signals.examplesTaught >= 16) {
-    return "Machine Learning Engineer";
-  }
-
-  return "Machine Learning Engineer";
+  // Default / lots of examples -> ML engineer
+  return CAREERS.ml_engineer;
 }

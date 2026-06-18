@@ -1,266 +1,334 @@
-import { useEffect, useMemo, useState } from "react";
-import { Header } from "./components/Header";
-import { WelcomeScreen } from "./components/WelcomeScreen";
-import { MissionSelection } from "./components/MissionSelection";
-import { TrainingScreen } from "./components/TrainingScreen";
-import { TestScreen } from "./components/TestScreen";
-import { LearningDashboard } from "./components/LearningDashboard";
-import { HardwarePowerScreen } from "./components/HardwarePowerScreen";
-import { ResultCard } from "./components/ResultCard";
-import { VisitorWall } from "./components/VisitorWall";
-import { missions } from "./data/missions";
-import { hardwareConcepts } from "./data/hardwareConcepts";
-import { getCareerMatch } from "./data/careers";
-import { TinyKNNClassifier } from "./utils/classifier";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type {
+  CareerMatch,
+  Mission,
+  PredictionResult,
+  Screen,
+  SessionStats,
+  VisitorResult,
+} from './types';
+import { DEFAULT_MISSION_ID, getMissionById } from './data/missions';
 import {
-  AppSettings,
-  clearVisitorWall,
-  loadSettings,
-  loadVisitorWall,
-  saveSettings,
-  saveVisitorResult
-} from "./utils/storage";
-import { Mission, PredictionResult, TrainingExample, VisitorResult } from "./types";
+  addExample as addExampleToModel,
+  countByLabel,
+  getConfusionHints,
+  resetClassifier,
+} from './utils/classifier';
+import {
+  loadPrefs,
+  saveVisitorResult,
+  savePrefs,
+  type BoothPrefs,
+} from './utils/storage';
+import Header from './components/Header';
+import WelcomeScreen from './components/WelcomeScreen';
+import MissionSelection from './components/MissionSelection';
+import TrainingScreen from './components/TrainingScreen';
+import TestScreen from './components/TestScreen';
+import LearningDashboard from './components/LearningDashboard';
+import HardwarePowerScreen from './components/HardwarePowerScreen';
+import ComputeSign from './components/ComputeSign';
+import ResultCard from './components/ResultCard';
+import VisitorWall from './components/VisitorWall';
 
-type Screen =
-  | "welcome"
-  | "missions"
-  | "training"
-  | "test"
-  | "dashboard"
-  | "hardware"
-  | "result"
-  | "wall";
+const MIN_PER_CLASS = 2;
+const IDLE_RESET_MS = 90_000; // return to welcome after ~90s idle (booth hygiene)
 
-const classifier = new TinyKNNClassifier();
+/** Raw, accumulating session signals; derived stats are computed from these. */
+interface SessionState {
+  predictionsMade: number;
+  correctFeedback: number;
+  wrongFeedback: number;
+  confidenceSum: number;
+  improvementsUsed: number;
+  missionsTried: Set<string>;
+  exploredHardware: boolean;
+  bestPrediction: { label: string; confidence: number } | null;
+}
+
+const EMPTY_SESSION: SessionState = {
+  predictionsMade: 0,
+  correctFeedback: 0,
+  wrongFeedback: 0,
+  confidenceSum: 0,
+  improvementsUsed: 0,
+  missionsTried: new Set(),
+  exploredHardware: false,
+  bestPrediction: null,
+};
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("welcome");
-  const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
-  const [examples, setExamples] = useState<TrainingExample[]>([]);
-  const [latestPrediction, setLatestPrediction] = useState<PredictionResult | null>(null);
-  const [confidenceHistory, setConfidenceHistory] = useState<number[]>([]);
-  const [feedbackCorrect, setFeedbackCorrect] = useState(0);
-  const [feedbackWrong, setFeedbackWrong] = useState(0);
-  const [improvementCount, setImprovementCount] = useState(0);
-  const [visitedHardware, setVisitedHardware] = useState(false);
-  const [missionsTried, setMissionsTried] = useState<string[]>([]);
-  const [nickname, setNickname] = useState("");
-  const [wallEntries, setWallEntries] = useState<VisitorResult[]>([]);
+  const [screen, setScreen] = useState<Screen>('welcome');
+  const [mission, setMission] = useState<Mission>(
+    () => getMissionById(DEFAULT_MISSION_ID)!,
+  );
+  const [selectedLabel, setSelectedLabel] = useState<string>(mission.labels[0].id);
+  // counts is a plain object kept in React state so the UI re-renders; the
+  // authoritative example vectors live in the classifier module.
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [session, setSession] = useState<SessionState>(() => ({ ...EMPTY_SESSION }));
+  const [savedToWall, setSavedToWall] = useState(false);
 
-  const [settings, setSettings] = useState<AppSettings>({
-    presenterMode: false,
-    reducedMotion: false
-  });
+  const [prefs, setPrefs] = useState<BoothPrefs>(() => loadPrefs());
 
+  // Apply booth preference classes to <body>.
   useEffect(() => {
-    setSettings(loadSettings());
-    setWallEntries(loadVisitorWall());
+    document.body.classList.toggle('presenter-mode', prefs.presenterMode);
+    document.body.classList.toggle('reduce-motion', prefs.reducedMotion);
+    savePrefs(prefs);
+  }, [prefs]);
+
+  // Idle auto-reset to keep the booth fresh for the next visitor.
+  useEffect(() => {
+    if (screen === 'welcome') return;
+    let timer = window.setTimeout(handleFullReset, IDLE_RESET_MS);
+    const bump = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(handleFullReset, IDLE_RESET_MS);
+    };
+    const events = ['pointerdown', 'keydown', 'pointermove'];
+    events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, bump));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
+  // ----- Derived stats -----
+  const stats: SessionStats = useMemo(() => {
+    const totalExamples = Object.values(counts).reduce((a, b) => a + b, 0);
+    const classesTrained = mission.labels.filter(
+      (l) => (counts[l.id] ?? 0) >= MIN_PER_CLASS,
+    ).length;
+    const totalFeedback = session.correctFeedback + session.wrongFeedback;
+    return {
+      totalExamples,
+      classesTrained,
+      totalClasses: mission.labels.length,
+      predictionsMade: session.predictionsMade,
+      correctFeedback: session.correctFeedback,
+      wrongFeedback: session.wrongFeedback,
+      accuracy: totalFeedback > 0 ? session.correctFeedback / totalFeedback : 0,
+      averageConfidence:
+        session.predictionsMade > 0 ? session.confidenceSum / session.predictionsMade : 0,
+      improvementsUsed: session.improvementsUsed,
+      missionsTried: session.missionsTried.size,
+      exploredHardware: session.exploredHardware,
+    };
+  }, [counts, mission.labels, session]);
+
+  const labelNameMap = useMemo(
+    () => Object.fromEntries(mission.labels.map((l) => [l.id, l.name])),
+    [mission.labels],
+  );
+
+  const confusionHints = useMemo(
+    () => getConfusionHints(labelNameMap),
+    // Recompute when example counts change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [counts, labelNameMap],
+  );
+
+  const bestPredictionName = session.bestPrediction
+    ? labelNameMap[session.bestPrediction.label] ?? ''
+    : '';
+
+  // ----- Actions -----
+  const refreshCounts = useCallback(() => {
+    setCounts(countByLabel());
   }, []);
 
-  useEffect(() => {
-    saveSettings(settings);
-    document.body.classList.toggle("reduced-motion", settings.reducedMotion);
-  }, [settings]);
-
-  const resetVisitor = () => {
-    classifier.clear();
-    setSelectedMission(null);
-    setExamples([]);
-    setLatestPrediction(null);
-    setConfidenceHistory([]);
-    setFeedbackCorrect(0);
-    setFeedbackWrong(0);
-    setImprovementCount(0);
-    setVisitedHardware(false);
-    setNickname("");
-    setScreen("welcome");
-  };
-
-  const handleSelectMission = (mission: Mission) => {
-    classifier.clear();
-    setSelectedMission(mission);
-    setExamples([]);
-    setLatestPrediction(null);
-    setConfidenceHistory([]);
-    setFeedbackCorrect(0);
-    setFeedbackWrong(0);
-    setImprovementCount(0);
-    setMissionsTried((prev) => Array.from(new Set([...prev, mission.id])));
-    setScreen("training");
-  };
-
-  const addExample = (label: string, vector: number[]) => {
-    const newExample = classifier.addExample(label, vector);
-    setExamples((prev) => [...prev, newExample]);
-  };
-
-  const updateTraining = () => {
-    classifier.addExamples(examples);
-  };
-
-  const predict = (vector: number[]) => {
-    if (!selectedMission) {
+  const handleSelectMission = (m: Mission) => {
+    // Switching missions starts a fresh model but remembers it was tried.
+    resetClassifier();
+    setMission(m);
+    setSelectedLabel(m.labels[0].id);
+    setCounts({});
+    setSavedToWall(false);
+    setSession((s) => {
+      const missionsTried = new Set(s.missionsTried);
+      missionsTried.add(m.id);
+      // Reset model-specific signals but keep cross-mission exploration flags.
       return {
-        predictedLabel: null,
-        confidence: 0,
-        confidenceByClass: [],
-        nearestExamples: [],
-        topGuesses: []
+        ...EMPTY_SESSION,
+        missionsTried,
+        exploredHardware: s.exploredHardware,
       };
-    }
-
-    const result = classifier.predict(vector, selectedMission.labels, 3);
-    setLatestPrediction(result);
-    if (result.confidence > 0) {
-      setConfidenceHistory((prev) => [...prev, result.confidence]);
-    }
-    return result;
+    });
+    setScreen('training');
   };
 
-  const counts = useMemo(() => {
-    if (!selectedMission) {
-      return {} as Record<string, number>;
-    }
-    return classifier.getLabelCounts(selectedMission.labels);
-  }, [examples, selectedMission]);
+  const handleAddExample = useCallback(
+    (label: string, vector: number[]) => {
+      addExampleToModel(label, vector);
+      refreshCounts();
+    },
+    [refreshCounts],
+  );
 
-  const averageConfidence = useMemo(() => {
-    if (!confidenceHistory.length) {
-      return 0;
-    }
-    const total = confidenceHistory.reduce((acc, c) => acc + c, 0);
-    return total / confidenceHistory.length;
-  }, [confidenceHistory]);
+  const handleTeachFromTest = useCallback(
+    (label: string, vector: number[]) => {
+      addExampleToModel(label, vector);
+      refreshCounts();
+      setSession((s) => ({ ...s, improvementsUsed: s.improvementsUsed + 1 }));
+    },
+    [refreshCounts],
+  );
 
-  const accuracy = useMemo(() => {
-    const total = feedbackCorrect + feedbackWrong;
-    return total ? (feedbackCorrect / total) * 100 : 0;
-  }, [feedbackCorrect, feedbackWrong]);
+  const handleRecordPrediction = useCallback((result: PredictionResult) => {
+    if (result.insufficientData || !result.predictedLabel) return;
+    setSession((s) => {
+      const best =
+        !s.bestPrediction || result.confidence > s.bestPrediction.confidence
+          ? { label: result.predictedLabel!, confidence: result.confidence }
+          : s.bestPrediction;
+      return {
+        ...s,
+        predictionsMade: s.predictionsMade + 1,
+        confidenceSum: s.confidenceSum + result.confidence,
+        bestPrediction: best,
+      };
+    });
+  }, []);
 
-  const careerMatch = getCareerMatch({
-    examplesTaught: examples.length,
-    accuracy,
-    viewedHardware: visitedHardware,
-    improvementCount,
-    missionsTried: missionsTried.length
-  });
+  const handleFeedback = useCallback((correct: boolean) => {
+    setSession((s) => ({
+      ...s,
+      correctFeedback: s.correctFeedback + (correct ? 1 : 0),
+      wrongFeedback: s.wrongFeedback + (correct ? 0 : 1),
+    }));
+  }, []);
 
-  const bestPrediction = latestPrediction?.predictedLabel ?? "N/A";
+  const handleEnterHardware = () => {
+    setSession((s) => ({ ...s, exploredHardware: true }));
+    setScreen('hardware');
+  };
 
-  const saveCard = () => {
-    if (!selectedMission) {
-      return;
-    }
-
+  const handleSaveResult = (nickname: string, career: CareerMatch) => {
     const entry: VisitorResult = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      nickname: nickname.trim() || "Guest Trainer",
-      missionName: selectedMission.name,
-      examplesTaught: examples.length,
-      accuracy,
-      careerMatch,
-      bestPrediction,
-      dateIso: new Date().toISOString()
+      id: `v_${Date.now()}`,
+      nickname,
+      missionName: mission.name,
+      examplesTaught: stats.totalExamples,
+      accuracy: stats.predictionsMade > 0 ? Math.round(stats.accuracy * 100) : 0,
+      careerTitle: career.title,
+      careerEmoji: career.emoji,
+      bestPrediction: bestPredictionName,
+      createdAt: Date.now(),
     };
-
-    const updated = saveVisitorResult(entry);
-    setWallEntries(updated);
-    setScreen("wall");
+    saveVisitorResult(entry);
+    setSavedToWall(true);
   };
 
+  function handleFullReset() {
+    resetClassifier();
+    const fresh = getMissionById(DEFAULT_MISSION_ID)!;
+    setMission(fresh);
+    setSelectedLabel(fresh.labels[0].id);
+    setCounts({});
+    setSession({ ...EMPTY_SESSION, missionsTried: new Set() });
+    setSavedToWall(false);
+    setScreen('welcome');
+  }
+
+  const goHome = () => setScreen('welcome');
+
+  // ----- Render -----
   return (
-    <div className={`min-h-screen ${settings.presenterMode ? "text-lg" : "text-base"}`}>
+    <div className="circuit-bg min-h-screen">
       <Header
-        presenterMode={settings.presenterMode}
-        reducedMotion={settings.reducedMotion}
-        onTogglePresenter={() => setSettings((s) => ({ ...s, presenterMode: !s.presenterMode }))}
-        onToggleMotion={() => setSettings((s) => ({ ...s, reducedMotion: !s.reducedMotion }))}
-        onResetVisitor={resetVisitor}
+        onHome={goHome}
+        onReset={handleFullReset}
+        presenterMode={prefs.presenterMode}
+        reducedMotion={prefs.reducedMotion}
+        onTogglePresenter={() =>
+          setPrefs((p) => ({ ...p, presenterMode: !p.presenterMode }))
+        }
+        onToggleMotion={() => setPrefs((p) => ({ ...p, reducedMotion: !p.reducedMotion }))}
+        currentScreen={screen}
       />
 
-      <main className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 md:px-6">
-        {screen === "welcome" ? (
-          <WelcomeScreen onStart={() => setScreen("missions")} onVisitorWall={() => setScreen("wall")} reducedMotion={settings.reducedMotion} />
-        ) : null}
+      <main>
+        {screen === 'welcome' && (
+          <WelcomeScreen
+            onStart={() => setScreen('missions')}
+            onVisitorWall={() => setScreen('wall')}
+            reducedMotion={prefs.reducedMotion}
+          />
+        )}
 
-        {screen === "missions" ? (
-          <MissionSelection missions={missions} onSelect={handleSelectMission} onBack={() => setScreen("welcome")} />
-        ) : null}
+        {screen === 'missions' && <MissionSelection onSelect={handleSelectMission} />}
 
-        {screen === "training" && selectedMission ? (
+        {screen === 'training' && (
           <TrainingScreen
-            mission={selectedMission}
-            examples={examples}
-            onAddExample={addExample}
-            onTrain={updateTraining}
-            onContinue={() => setScreen("test")}
-            presenterMode={settings.presenterMode}
-          />
-        ) : null}
-
-        {screen === "test" && selectedMission ? (
-          <TestScreen
-            mission={selectedMission}
-            onPredict={predict}
-            onFeedback={(correct) => {
-              if (correct) {
-                setFeedbackCorrect((v) => v + 1);
-              } else {
-                setFeedbackWrong((v) => v + 1);
-              }
-            }}
-            onTeachFromTest={(label, vector) => {
-              addExample(label, vector);
-              setImprovementCount((v) => v + 1);
-            }}
-            onNext={() => setScreen("dashboard")}
-            presenterMode={settings.presenterMode}
-          />
-        ) : null}
-
-        {screen === "dashboard" && selectedMission ? (
-          <LearningDashboard
+            mission={mission}
             counts={counts}
-            feedbackCorrect={feedbackCorrect}
-            feedbackWrong={feedbackWrong}
-            averageConfidence={averageConfidence}
-            onNext={() => {
-              setVisitedHardware(true);
-              setScreen("hardware");
-            }}
+            minPerClass={MIN_PER_CLASS}
+            selectedLabel={selectedLabel}
+            onSelectLabel={setSelectedLabel}
+            onAddExample={handleAddExample}
+            onTrained={() => setScreen('test')}
+            onBack={() => setScreen('missions')}
           />
-        ) : null}
+        )}
 
-        {screen === "hardware" ? (
-          <HardwarePowerScreen concepts={hardwareConcepts} onContinue={() => setScreen("result")} />
-        ) : null}
+        {screen === 'test' && (
+          <TestScreen
+            mission={mission}
+            onFeedback={handleFeedback}
+            onTeach={handleTeachFromTest}
+            onRecordPrediction={handleRecordPrediction}
+            onDashboard={() => setScreen('dashboard')}
+            onBackToTraining={() => setScreen('training')}
+          />
+        )}
 
-        {screen === "result" && selectedMission ? (
+        {screen === 'dashboard' && (
+          <LearningDashboard
+            mission={mission}
+            stats={stats}
+            confusionHints={confusionHints}
+            onTestMore={() => setScreen('test')}
+            onHardware={handleEnterHardware}
+          />
+        )}
+
+        {screen === 'hardware' && (
+          <HardwarePowerScreen
+            onComputeSign={() => setScreen('compute')}
+            onResultCard={() => setScreen('result')}
+          />
+        )}
+
+        {screen === 'compute' && (
+          <ComputeSign
+            onBack={() => setScreen('hardware')}
+            onResultCard={() => setScreen('result')}
+          />
+        )}
+
+        {screen === 'result' && (
           <ResultCard
-            nickname={nickname}
-            setNickname={setNickname}
-            missionName={selectedMission.name}
-            examplesTaught={examples.length}
-            accuracy={accuracy}
-            bestPrediction={bestPrediction}
-            careerMatch={careerMatch}
-            onSave={saveCard}
-            onBackToStart={resetVisitor}
+            mission={mission}
+            stats={stats}
+            bestPredictionName={bestPredictionName}
+            onSave={handleSaveResult}
+            onVisitorWall={() => setScreen('wall')}
+            onReset={handleFullReset}
+            saved={savedToWall}
           />
-        ) : null}
+        )}
 
-        {screen === "wall" ? (
-          <VisitorWall
-            entries={wallEntries}
-            onBack={() => setScreen("welcome")}
-            onClear={() => {
-              clearVisitorWall();
-              setWallEntries([]);
-            }}
-          />
-        ) : null}
+        {screen === 'wall' && (
+          <VisitorWall onStart={() => setScreen('missions')} onHome={goHome} />
+        )}
       </main>
+
+      <footer className="border-t border-amd-line/60 px-4 py-4 text-center text-xs text-slate-500">
+        Train a Tiny AI · An AMD-inspired compute demo for STEM festivals · Built with React +
+        TypeScript · Runs fully in your browser
+      </footer>
     </div>
   );
 }

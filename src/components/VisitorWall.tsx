@@ -1,42 +1,124 @@
-import { VisitorResult } from "../types";
+import { useEffect, useState } from 'react';
+import type { VisitorResult } from '../types';
+import { clearVisitorWall, loadVisitorWall } from '../utils/storage';
 
 interface VisitorWallProps {
-  entries: VisitorResult[];
-  onBack: () => void;
-  onClear: () => void;
+  onStart: () => void;
+  onHome: () => void;
 }
 
-export function VisitorWall({ entries, onBack, onClear }: VisitorWallProps) {
+/** Leaderboard / wall of saved visitor results from localStorage. */
+export default function VisitorWall({ onStart, onHome }: VisitorWallProps) {
+  const [entries, setEntries] = useState<VisitorResult[]>([]);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  useEffect(() => {
+    setEntries(loadVisitorWall());
+  }, []);
+
+  const handleClear = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    clearVisitorWall();
+    setEntries([]);
+    setConfirmClear(false);
+  };
+
   return (
-    <section className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-3xl font-bold">Visitor Wall</h2>
-        <div className="flex gap-2">
-          <button className="btn-secondary" onClick={onBack}>
-            Back to Start
-          </button>
-          <button className="rounded-xl border border-red-300/40 bg-red-500/20 px-4 py-2" onClick={onClear}>
-            Clear Visitor Wall
-          </button>
-        </div>
+    <div className="mx-auto max-w-4xl px-4 py-8">
+      <div className="mb-6 flex flex-col items-center text-center">
+        <span className="text-4xl">🏆</span>
+        <h2 className="mt-2 text-3xl font-black sm:text-4xl">
+          Visitor <span className="text-gradient">Wall</span>
+        </h2>
+        <p className="mt-2 text-slate-300">
+          Everyone who trained a Tiny AI at this booth. Can you beat their accuracy?
+        </p>
       </div>
 
       {entries.length === 0 ? (
-        <div className="panel p-6 text-white/75">No entries yet. Train a tiny AI and save your result card.</div>
+        <div className="glow-card rounded-2xl p-10 text-center">
+          <div className="mb-3 text-5xl">🤖</div>
+          <p className="text-slate-300">
+            No trainers yet. Be the first to teach an AI and save your result!
+          </p>
+          <button onClick={onStart} className="btn-primary mt-5 rounded-2xl px-6 py-3 text-lg">
+            🚀 Start Training
+          </button>
+        </div>
       ) : (
-        <div className="grid gap-3">
-          {entries.map((entry) => (
-            <div key={entry.id} className="panel grid gap-2 p-4 md:grid-cols-6 md:items-center">
-              <p className="font-semibold">{entry.nickname}</p>
-              <p>{entry.missionName}</p>
-              <p>{entry.examplesTaught} examples</p>
-              <p>{entry.accuracy.toFixed(1)}% accuracy</p>
-              <p>{entry.careerMatch}</p>
-              <p className="text-xs text-white/60">{new Date(entry.dateIso).toLocaleString()}</p>
-            </div>
-          ))}
+        <div className="glow-card overflow-hidden rounded-2xl">
+          {/* Header row (hidden on small screens) */}
+          <div className="hidden grid-cols-[40px_1.4fr_1.2fr_0.8fr_0.8fr_1.4fr] gap-2 border-b border-amd-line bg-amd-panel2/70 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-400 sm:grid">
+            <span>#</span>
+            <span>Trainer</span>
+            <span>Mission</span>
+            <span className="text-center">Examples</span>
+            <span className="text-center">Accuracy</span>
+            <span>Career match</span>
+          </div>
+
+          <ul className="divide-y divide-amd-line/70">
+            {entries.map((e, i) => (
+              <li
+                key={e.id}
+                className="grid grid-cols-2 gap-2 px-4 py-3 sm:grid-cols-[40px_1.4fr_1.2fr_0.8fr_0.8fr_1.4fr] sm:items-center"
+              >
+                <span className="hidden text-lg font-black text-amd-amber sm:block">{i + 1}</span>
+
+                <span className="col-span-2 flex items-center justify-between sm:col-span-1 sm:block">
+                  <span className="text-base font-extrabold">
+                    <span className="mr-1 text-amd-amber sm:hidden">#{i + 1}</span>
+                    {e.nickname}
+                  </span>
+                  <span className="text-xs text-slate-500 sm:hidden">
+                    {new Date(e.createdAt).toLocaleDateString()}
+                  </span>
+                </span>
+
+                <span className="text-sm text-slate-300">{e.missionName}</span>
+
+                <span className="text-sm sm:text-center">
+                  <span className="text-slate-500 sm:hidden">Examples: </span>
+                  <span className="font-bold">{e.examplesTaught}</span>
+                </span>
+
+                <span className="text-sm sm:text-center">
+                  <span className="text-slate-500 sm:hidden">Accuracy: </span>
+                  <span className="font-bold text-amd-amber">{e.accuracy}%</span>
+                </span>
+
+                <span className="text-sm">
+                  {e.careerEmoji} {e.careerTitle}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
-    </section>
+
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <button onClick={onHome} className="btn-ghost rounded-2xl px-6 py-3 text-base">
+          ← Back to start
+        </button>
+        <button onClick={onStart} className="btn-primary rounded-2xl px-6 py-3 text-base">
+          🚀 Train a Tiny AI
+        </button>
+        {entries.length > 0 && (
+          <button
+            onClick={handleClear}
+            className={`rounded-2xl px-6 py-3 text-base font-bold transition ${
+              confirmClear
+                ? 'bg-amd-red text-white'
+                : 'border border-amd-line bg-amd-panel/60 text-slate-300 hover:border-amd-red/60'
+            }`}
+          >
+            {confirmClear ? 'Tap again to confirm clear' : '🗑 Clear visitor wall'}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

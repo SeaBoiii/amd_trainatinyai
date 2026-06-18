@@ -1,28 +1,54 @@
-import { ClassLabel } from "../types";
+import type { ClassLabel } from '../types';
 
 interface TrainingStatsProps {
-  counts: Record<ClassLabel, number>;
   labels: ClassLabel[];
+  counts: Record<string, number>;
   minPerClass: number;
-  isTrained: boolean;
 }
 
-export function TrainingStats({ counts, labels, minPerClass, isTrained }: TrainingStatsProps) {
-  const total = labels.reduce((acc, label) => acc + (counts[label] ?? 0), 0);
-  const ready = labels.every((label) => (counts[label] ?? 0) >= minPerClass);
+/**
+ * A compact readiness summary for the training screen: total examples, how many
+ * classes are ready, and an overall progress bar toward "AI ready".
+ */
+export default function TrainingStats({ labels, counts, minPerClass }: TrainingStatsProps) {
+  const total = labels.reduce((sum, l) => sum + (counts[l.id] ?? 0), 0);
+  const classesReady = labels.filter((l) => (counts[l.id] ?? 0) >= minPerClass).length;
+  const progress = labels.length > 0 ? classesReady / labels.length : 0;
+  const allReady = classesReady === labels.length;
 
   return (
-    <div className="panel p-4">
-      <h3 className="font-display text-xl font-semibold">Training Progress</h3>
-      <p className="mt-2 text-sm text-white/80">Total examples: {total}</p>
-      <p className="text-sm text-white/80">Classes trained: {labels.filter((l) => (counts[l] ?? 0) > 0).length}</p>
-      <p className="mt-2 text-sm text-ember-200">
-        {ready
-          ? "Great coverage! Your tiny AI is ready to compare new drawings."
-          : `Add at least ${minPerClass} examples for each class so your AI has something to learn from.`}
-      </p>
-      <p className="mt-2 text-xs text-white/60">
-        Status: {isTrained ? "AI memory updated and ready for inference" : "Awaiting training update"}
+    <div className="glow-card rounded-2xl p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-bold uppercase tracking-wide text-slate-300">
+          Training progress
+        </h3>
+        <span className="text-xs text-slate-400">{total} examples</span>
+      </div>
+
+      <div className="mb-2 h-3 w-full overflow-hidden rounded-full bg-amd-panel2">
+        <div
+          className={`h-full rounded-full transition-[width] duration-500 ${
+            allReady
+              ? 'bg-gradient-to-r from-emerald-500 to-emerald-400'
+              : 'bg-gradient-to-r from-amd-red to-amd-orange'
+          }`}
+          style={{ width: `${Math.round(progress * 100)}%` }}
+        />
+      </div>
+
+      <p className="text-sm">
+        {allReady ? (
+          <span className="font-semibold text-emerald-300">
+            ✓ Every class is ready — train your AI!
+          </span>
+        ) : (
+          <span className="text-slate-300">
+            {classesReady} of {labels.length} classes ready.{' '}
+            <span className="text-amd-amber">
+              Add at least {minPerClass} examples per class.
+            </span>
+          </span>
+        )}
       </p>
     </div>
   );

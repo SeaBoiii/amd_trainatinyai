@@ -1,139 +1,242 @@
-import { useState } from "react";
-import { Mission, PredictionResult } from "../types";
-import { DrawingCanvas } from "./DrawingCanvas";
-import { PredictionPanel } from "./PredictionPanel";
-import { extractVectorFromCanvas, vectorInkAmount } from "../utils/canvasProcessing";
+import { useRef, useState } from 'react';
+import type { Mission, PredictionResult } from '../types';
+import MissionInput, { type MissionInputHandle } from './MissionInput';
+import PredictionPanel from './PredictionPanel';
+import { predict } from '../utils/classifier';
 
 interface TestScreenProps {
   mission: Mission;
-  onPredict: (vector: number[]) => PredictionResult;
   onFeedback: (correct: boolean) => void;
-  onTeachFromTest: (label: string, vector: number[]) => void;
-  onNext: () => void;
-  presenterMode: boolean;
+  /** Adds the just-tested drawing as a new example for the chosen label. */
+  onTeach: (label: string, vector: number[]) => void;
+  onRecordPrediction: (result: PredictionResult) => void;
+  onDashboard: () => void;
+  onBackToTraining: () => void;
 }
 
-export function TestScreen({
-  mission,
-  onPredict,
-  onFeedback,
-  onTeachFromTest,
-  onNext,
-  presenterMode
-}: TestScreenProps) {
-  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
-  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
-  const [message, setMessage] = useState("Draw a fresh test doodle and click Ask the AI.");
-  const [latestVector, setLatestVector] = useState<number[] | null>(null);
+type Phase = 'drawing' | 'thinking' | 'result';
 
-  const clearCanvas = () => {
-    if (!canvasEl) {
+/**
+ * Test screen: the visitor makes a new example, asks the AI, and gives feedback.
+ * If the AI is wrong, they can teach it the new example to improve it — showing
+ * the iterative "more/better data makes AI smarter" idea.
+ */
+export default function TestScreen({
+  mission,
+  onFeedback,
+  onTeach,
+  onRecordPrediction,
+  onDashboard,
+  onBackToTraining,
+}: TestScreenProps) {
+  const canvasRef = useRef<MissionInputHandle>(null);
+  const [phase, setPhase] = useState<Phase>('drawing');
+  const [result, setResult] = useState<PredictionResult | null>(null);
+  const [lastVector, setLastVector] = useState<number[] | null>(null);
+  const [warning, setWarning] = useState('');
+  const [feedbackMsg, setFeedbackMsg] = useState('');
+  const [answered, setAnswered] = useState(false);
+  const [teachOpen, setTeachOpen] = useState(false);
+  const [taughtMsg, setTaughtMsg] = useState('');
+
+  const labelIds = mission.labels.map((l) => l.id);
+  const isDraw = mission.inputType === 'draw';
+  const actionVerb = isDraw ? 'Draw' : 'Make';
+
+  const handleAsk = () => {
+    const vector = canvasRef.current?.getVector();
+    if (!vector) {
+      setWarning(
+        isDraw
+          ? 'Draw a bigger shape so the AI has something to compare.'
+          : 'Adjust the sliders to set up an example first.',
+      );
       return;
     }
-    const ctx = canvasEl.getContext("2d");
-    if (!ctx) {
-      return;
-    }
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+    setWarning('');
+    setLastVector(vector);
+    setPhase('thinking');
+    // Brief pause so the "comparing" message is visible — feels like real work.
+    setTimeout(() => {
+      const prediction = predict(vector, labelIds, 3);
+      setResult(prediction);
+      onRecordPrediction(prediction);
+      setPhase('result');
+      setAnswered(false);
+      setTeachOpen(false);
+      setFeedbackMsg('');
+      setTaughtMsg('');
+    }, 850);
   };
 
-  const askAI = () => {
-    if (!canvasEl) {
-      return;
-    }
+  const handleNewDrawing = () => {
+    canvasRef.current?.reset();
+    setPhase('drawing');
+    setResult(null);
+    setLastVector(null);
+    setAnswered(false);
+    setTeachOpen(false);
+    setWarning('');
+    setFeedbackMsg('');
+    setTaughtMsg('');
+  };
 
-    const vector = extractVectorFromCanvas(canvasEl, 16);
-    const ink = vectorInkAmount(vector);
-    if (ink < 0.02) {
-      setMessage("Please draw something first.");
-      return;
-    }
+  const handleCorrect = () => {
+    onFeedback(true);
+    setAnswered(true);
+    setFeedbackMsg('Nice! Your training examples helped the AI recognise the pattern.');
+  };
 
-    const result = onPredict(vector);
-    setLatestVector(vector);
-    setPrediction(result);
+  const handleWrong = () => {
+    onFeedback(false);
+    setAnswered(true);
+    setTeachOpen(true);
+    setFeedbackMsg('That is okay! AI improves when we give it better data.');
+  };
 
-    if (!result.predictedLabel) {
-      setMessage("Your AI needs more examples before predicting.");
-      return;
-    }
-
-    setMessage(result.confidence >= 70 ? "Nice! Your training examples helped the AI recognise the pattern." : "The AI made a guess. More examples can improve it.");
+  const handleTeach = (labelId: string) => {
+    if (!lastVector) return;
+    onTeach(labelId, lastVector);
+    const name = mission.labels.find((l) => l.id === labelId)?.name ?? labelId;
+    setTaughtMsg(`Thanks! The AI now knows this example is a ${name}. It just got a little smarter.`);
+    setTeachOpen(false);
   };
 
   return (
-    <section className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="font-display text-3xl font-bold">Test Your Tiny AI</h2>
-          <p className="text-sm text-white/70">Mission: {mission.name}</p>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl" aria-hidden="true">
+            🔍
+          </span>
+          <div>
+            <h2 className="text-2xl font-extrabold">Test your Tiny AI</h2>
+            <p className="text-sm text-slate-400">
+              {actionVerb} a new {mission.name.toLowerCase()} item and see what the AI guesses.
+            </p>
+          </div>
         </div>
-        <button className="btn-primary" onClick={onNext}>
-          Open Learning Dashboard
+        <button onClick={onBackToTraining} className="btn-ghost rounded-xl px-4 py-2 text-sm">
+          ← Add more examples
         </button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-        <div className="panel flex flex-col items-center gap-4 p-4">
-          <DrawingCanvas onReady={setCanvasEl} presenterMode={presenterMode} />
-          <div className="flex flex-wrap justify-center gap-2">
-            <button className="btn-secondary" onClick={clearCanvas}>
-              Clear Canvas
-            </button>
-            <button className="btn-primary" onClick={askAI}>
-              Ask the AI
-            </button>
-          </div>
-          <p className="text-center text-sm text-ember-200">{message}</p>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Left: input */}
+        <div className="flex flex-col items-center">
+          <MissionInput ref={canvasRef} mission={mission} size={340} disabled={phase === 'thinking'} />
 
-          <div className="mt-2 flex flex-wrap justify-center gap-2">
-            <button
-              className="rounded-xl border border-green-300/40 bg-green-500/20 px-4 py-2"
-              onClick={() => {
-                onFeedback(true);
-                setMessage("Great feedback logged as Correct.");
-              }}
-              disabled={!prediction?.predictedLabel}
-            >
-              Correct
+          <div className="mt-4 grid w-full max-w-[340px] grid-cols-2 gap-3">
+            <button onClick={handleNewDrawing} className="btn-ghost rounded-xl py-3 text-base">
+              {isDraw ? '🧹 New Drawing' : '🔄 New Example'}
             </button>
             <button
-              className="rounded-xl border border-red-300/40 bg-red-500/20 px-4 py-2"
-              onClick={() => {
-                onFeedback(false);
-                setMessage("That is okay! AI improves when we give it better data.");
-              }}
-              disabled={!prediction?.predictedLabel}
+              onClick={handleAsk}
+              disabled={phase === 'thinking'}
+              className="btn-primary rounded-xl py-3 text-base disabled:opacity-60"
             >
-              Wrong
+              🤖 Ask the AI
             </button>
           </div>
 
-          <div className="mt-2 w-full">
-            <p className="text-sm text-white/70">If the AI is wrong, teach it this test example:</p>
-            <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
-              {mission.labels.map((label) => (
-                <button
-                  key={label}
-                  className="btn-secondary text-xs"
-                  disabled={!latestVector}
-                  onClick={() => {
-                    if (latestVector) {
-                      onTeachFromTest(label, latestVector);
-                      setMessage("New correction example added. Great iterative improvement!");
-                    }
-                  }}
-                >
-                  Teach as {label}
-                </button>
-              ))}
-            </div>
+          <div className="mt-3 min-h-[28px] w-full max-w-[340px] text-center" aria-live="polite">
+            {warning && (
+              <p className="rounded-lg bg-amd-red/15 px-3 py-2 text-sm font-medium text-red-200">
+                {warning}
+              </p>
+            )}
+            {phase === 'thinking' && (
+              <p className="rounded-lg bg-amd-orange/15 px-3 py-2 text-sm font-medium text-amd-amber">
+                The AI is comparing your example with the ones you gave it…
+              </p>
+            )}
           </div>
         </div>
 
-        <PredictionPanel prediction={prediction} />
+        {/* Right: results */}
+        <div>
+          {phase !== 'result' || !result ? (
+            <div className="glow-card grid h-full min-h-[300px] place-items-center rounded-2xl p-6 text-center">
+              <div>
+                <div className="mb-3 text-5xl">{phase === 'thinking' ? '🧠' : '👈'}</div>
+                <p className="text-slate-300">
+                  {phase === 'thinking'
+                    ? 'Thinking…'
+                    : `${actionVerb} on the left and tap “Ask the AI” to see its prediction.`}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <PredictionPanel result={result} labels={mission.labels} mission={mission} />
+
+              {/* Feedback */}
+              {!result.insufficientData && (
+                <div className="glow-card rounded-2xl p-5">
+                  {!answered ? (
+                    <>
+                      <p className="mb-3 text-center text-sm font-semibold text-slate-200">
+                        Did the AI get it right?
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          onClick={handleCorrect}
+                          className="rounded-xl bg-emerald-500/90 py-3 text-base font-bold text-white transition hover:bg-emerald-500"
+                        >
+                          ✓ Correct
+                        </button>
+                        <button
+                          onClick={handleWrong}
+                          className="rounded-xl bg-amd-red/90 py-3 text-base font-bold text-white transition hover:bg-amd-red"
+                        >
+                          ✗ Wrong
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-center text-sm font-medium text-slate-200">{feedbackMsg}</p>
+                  )}
+
+                  {/* Improvement loop */}
+                  {teachOpen && (
+                    <div className="mt-4 border-t border-amd-line pt-4">
+                      <p className="mb-2 text-center text-sm font-semibold text-amd-amber">
+                        Teach the AI this example — what should it have been?
+                      </p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {mission.labels.map((label) => (
+                          <button
+                            key={label.id}
+                            onClick={() => handleTeach(label.id)}
+                            className="btn-ghost rounded-xl px-3 py-2 text-sm"
+                          >
+                            {label.emoji} {label.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {taughtMsg && (
+                    <p className="mt-3 rounded-lg bg-emerald-500/15 px-3 py-2 text-center text-sm font-medium text-emerald-200">
+                      {taughtMsg}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button onClick={handleNewDrawing} className="btn-ghost flex-1 rounded-xl py-3">
+                  🔁 Try another
+                </button>
+                <button onClick={onDashboard} className="btn-primary flex-1 rounded-xl py-3">
+                  📊 See AI Dashboard →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </section>
+    </div>
   );
 }

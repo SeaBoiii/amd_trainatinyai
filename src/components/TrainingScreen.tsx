@@ -1,136 +1,240 @@
-import { useMemo, useState } from "react";
-import { ClassLabel, Mission, TrainingExample } from "../types";
-import { DrawingCanvas } from "./DrawingCanvas";
-import { ClassSelector } from "./ClassSelector";
-import { TrainingStats } from "./TrainingStats";
-import { extractVectorFromCanvas, vectorInkAmount } from "../utils/canvasProcessing";
+import { useMemo, useRef, useState } from 'react';
+import type { Mission } from '../types';
+import MissionInput, { type MissionInputHandle } from './MissionInput';
+import ClassSelector from './ClassSelector';
+import TrainingStats from './TrainingStats';
+import { AICore } from './ui';
 
 interface TrainingScreenProps {
   mission: Mission;
-  examples: TrainingExample[];
-  onAddExample: (label: ClassLabel, vector: number[]) => void;
-  onTrain: () => void;
-  onContinue: () => void;
-  presenterMode: boolean;
+  counts: Record<string, number>;
+  minPerClass: number;
+  selectedLabel: string;
+  onSelectLabel: (id: string) => void;
+  onAddExample: (label: string, vector: number[]) => void;
+  onTrained: () => void;
+  onBack: () => void;
 }
 
-const MIN_PER_CLASS = 2;
+const TRAIN_STEPS = [
+  'Reading examples…',
+  'Finding patterns…',
+  'Preparing tiny model…',
+  'Ready for inference!',
+];
 
-export function TrainingScreen({
+/**
+ * The main training interaction: select a label, draw, add the example, repeat.
+ * When every class has enough examples, the visitor runs a short, friendly
+ * "training" animation (KNN simply stores the examples) and moves to testing.
+ */
+export default function TrainingScreen({
   mission,
-  examples,
+  counts,
+  minPerClass,
+  selectedLabel,
+  onSelectLabel,
   onAddExample,
-  onTrain,
-  onContinue,
-  presenterMode
+  onTrained,
+  onBack,
 }: TrainingScreenProps) {
-  const [selectedLabel, setSelectedLabel] = useState<ClassLabel>(mission.labels[0]);
-  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
-  const [statusText, setStatusText] = useState("Select a label and start drawing.");
-  const [isTraining, setIsTraining] = useState(false);
-  const [trained, setTrained] = useState(false);
+  const canvasRef = useRef<MissionInputHandle>(null);
+  const [feedback, setFeedback] = useState<string>('');
+  const [warning, setWarning] = useState<string>('');
+  const [training, setTraining] = useState(false);
+  const [trainStep, setTrainStep] = useState(0);
+  const [pulseLabel, setPulseLabel] = useState<string | null>(null);
 
-  const counts = useMemo(() => {
-    return mission.labels.reduce<Record<ClassLabel, number>>((acc, label) => {
-      acc[label] = examples.filter((e) => e.label === label).length;
-      return acc;
-    }, {} as Record<ClassLabel, number>);
-  }, [examples, mission.labels]);
+  const selected = mission.labels.find((l) => l.id === selectedLabel) ?? mission.labels[0];
+  const isDraw = mission.inputType === 'draw';
+  const actionVerb = isDraw ? 'Draw' : 'Make';
 
-  const clearCanvas = () => {
-    if (!canvasEl) {
+  const allReady = useMemo(
+    () => mission.labels.every((l) => (counts[l.id] ?? 0) >= minPerClass),
+    [mission.labels, counts, minPerClass],
+  );
+
+  const totalExamples = mission.labels.reduce((s, l) => s + (counts[l.id] ?? 0), 0);
+
+  const handleAdd = () => {
+    const vector = canvasRef.current?.getVector();
+    if (!vector) {
+      setWarning(
+        isDraw
+          ? 'Draw a bigger shape so the AI can see it, then add it as an example.'
+          : 'Adjust the sliders to set up this example first.',
+      );
+      setFeedback('');
       return;
     }
-    const ctx = canvasEl.getContext("2d");
-    if (!ctx) {
-      return;
-    }
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+    onAddExample(selected.id, vector);
+    setWarning('');
+    setFeedback(`Great! Your AI now has another ${selected.name} example to learn from.`);
+    setPulseLabel(selected.id);
+    setTimeout(() => setPulseLabel(null), 600);
+    canvasRef.current?.reset();
   };
 
-  const addExample = () => {
-    if (!canvasEl) {
-      return;
-    }
-
-    const vector = extractVectorFromCanvas(canvasEl, 16);
-    const ink = vectorInkAmount(vector);
-
-    if (ink < 0.02) {
-      setStatusText("Draw something first, then add example.");
-      return;
-    }
-
-    onAddExample(selectedLabel, vector);
-    setStatusText("Great! Your AI now has another example to learn from.");
-    clearCanvas();
+  const handleClear = () => {
+    canvasRef.current?.reset();
+    setFeedback('');
+    setWarning('');
   };
 
-  const readyForTraining = mission.labels.every((label) => (counts[label] ?? 0) >= MIN_PER_CLASS);
-
-  const runTraining = async () => {
-    if (!readyForTraining) {
-      setStatusText("Add at least 2 examples for each class so your AI has something to learn from.");
+  const handleTrain = () => {
+    if (!allReady) {
+      setWarning(
+        `Add at least ${minPerClass} examples for each class so your AI has something to learn from.`,
+      );
       return;
     }
-
-    setIsTraining(true);
-    const steps = ["Reading examples...", "Finding patterns...", "Preparing tiny model...", "Ready for inference!"];
-
-    for (const step of steps) {
-      setStatusText(step);
-      await new Promise((resolve) => window.setTimeout(resolve, 450));
-    }
-
-    onTrain();
-    setIsTraining(false);
-    setTrained(true);
+    setWarning('');
+    setTraining(true);
+    setTrainStep(0);
+    // Step through the friendly "training" messages, then advance to testing.
+    let step = 0;
+    const id = setInterval(() => {
+      step += 1;
+      if (step >= TRAIN_STEPS.length) {
+        clearInterval(id);
+        setTimeout(() => {
+          setTraining(false);
+          onTrained();
+        }, 700);
+      } else {
+        setTrainStep(step);
+      }
+    }, 750);
   };
 
   return (
-    <section className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="font-display text-3xl font-bold">Training: {mission.name}</h2>
-          <p className="text-sm text-white/70">Teach your AI with examples for each class label.</p>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      {/* Mission header */}
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl" aria-hidden="true">
+            {mission.emoji}
+          </span>
+          <div>
+            <h2 className="text-2xl font-extrabold">{mission.name}</h2>
+            <p className="text-sm text-slate-400">
+              Teach the AI by giving it examples for each class.
+            </p>
+          </div>
         </div>
-        <button className="btn-primary" onClick={onContinue} disabled={!trained}>
-          Go to Test Screen
+        <button onClick={onBack} className="btn-ghost rounded-xl px-4 py-2 text-sm">
+          ← Missions
         </button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr_1fr]">
-        <ClassSelector
-          labels={mission.labels}
-          selected={selectedLabel}
-          counts={counts}
-          onSelect={(label) => {
-            setSelectedLabel(label);
-            setStatusText(`Now teaching label: ${label}`);
-          }}
-        />
-
-        <div className="panel flex flex-col items-center gap-4 p-4">
-          <p className="text-sm text-white/70">Draw a {selectedLabel} example</p>
-          <DrawingCanvas onReady={setCanvasEl} presenterMode={presenterMode} />
-          <div className="flex flex-wrap justify-center gap-2">
-            <button className="btn-secondary" onClick={clearCanvas}>
-              Clear Canvas
-            </button>
-            <button className="btn-primary" onClick={addExample}>
-              Add Example
-            </button>
-            <button className="btn-secondary" onClick={runTraining} disabled={isTraining}>
-              Train / Update AI
-            </button>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_1fr]">
+        {/* Left: class selector + stats */}
+        <div className="flex flex-col gap-4">
+          <div>
+            <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-300">
+              1 · Pick what to teach
+            </h3>
+            <ClassSelector
+              labels={mission.labels}
+              selectedId={selected.id}
+              counts={counts}
+              onSelect={onSelectLabel}
+              minPerClass={minPerClass}
+            />
           </div>
-          <p className="text-sm text-ember-200">{statusText}</p>
-          <div className={`h-16 w-16 rounded-full bg-gradient-to-r from-ember-500 to-orange-300 ${isTraining ? "animate-pulseCore" : ""}`} />
+          <TrainingStats labels={mission.labels} counts={counts} minPerClass={minPerClass} />
         </div>
 
-        <TrainingStats counts={counts} labels={mission.labels} minPerClass={MIN_PER_CLASS} isTrained={trained} />
+        {/* Right: canvas + actions */}
+        <div className="flex flex-col items-center">
+          <div className="mb-2 self-start">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-300">
+              2 · {actionVerb} a{' '}
+              <span className="text-amd-amber">
+                {selected.emoji} {selected.name}
+              </span>
+            </h3>
+          </div>
+
+          <MissionInput
+            ref={canvasRef}
+            mission={mission}
+            size={340}
+            onInteract={() => setWarning('')}
+          />
+
+          <div className="mt-4 grid w-full max-w-[340px] grid-cols-2 gap-3">
+            <button onClick={handleClear} className="btn-ghost rounded-xl py-3 text-base">
+              {isDraw ? '🧹 Clear' : '🔄 Reset'}
+            </button>
+            <button onClick={handleAdd} className="btn-primary rounded-xl py-3 text-base">
+              ➕ Add Example
+            </button>
+          </div>
+
+          {/* Live feedback / warnings */}
+          <div className="mt-3 min-h-[28px] w-full max-w-[340px] text-center" aria-live="polite">
+            {warning && (
+              <p className="rounded-lg bg-amd-red/15 px-3 py-2 text-sm font-medium text-red-200">
+                {warning}
+              </p>
+            )}
+            {!warning && feedback && (
+              <p className="rounded-lg bg-emerald-500/15 px-3 py-2 text-sm font-medium text-emerald-200">
+                {feedback}
+              </p>
+            )}
+          </div>
+
+          {/* Train button */}
+          <button
+            onClick={handleTrain}
+            disabled={!allReady}
+            className={`mt-4 w-full max-w-[340px] rounded-2xl py-4 text-lg font-extrabold transition ${
+              allReady
+                ? 'btn-primary'
+                : 'cursor-not-allowed border border-amd-line bg-amd-panel/60 text-slate-500'
+            }`}
+          >
+            {allReady ? '🧠 Train Tiny AI →' : `Add ${minPerClass}+ per class to train`}
+          </button>
+          <p className="mt-2 max-w-[340px] text-center text-xs text-slate-400">
+            Your AI stores your examples and compares new ones against them. You've taught it{' '}
+            <span className="font-bold text-amd-amber">{totalExamples}</span> example
+            {totalExamples === 1 ? '' : 's'} so far.
+          </p>
+        </div>
       </div>
-    </section>
+
+      {/* Pulse acknowledgement when an example is added */}
+      {pulseLabel && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 -translate-x-1/2 animate-fadeUp rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white shadow-glow">
+          +1 example added ✓
+        </div>
+      )}
+
+      {/* Training overlay animation */}
+      {training && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-amd-dark/90 backdrop-blur">
+          <div className="flex flex-col items-center text-center">
+            <AICore size={170} active />
+            <p className="mt-6 text-2xl font-extrabold text-gradient">{TRAIN_STEPS[trainStep]}</p>
+            <div className="mt-4 flex gap-2">
+              {TRAIN_STEPS.map((_, i) => (
+                <span
+                  key={i}
+                  className={`h-2.5 w-2.5 rounded-full transition ${
+                    i <= trainStep ? 'bg-amd-orange' : 'bg-amd-line'
+                  }`}
+                />
+              ))}
+            </div>
+            <p className="mt-4 max-w-sm text-sm text-slate-400">
+              Your tiny model is getting your examples ready for comparison.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,38 +1,61 @@
-import { ClassLabel } from "../types";
+import type { ClassLabel } from '../types';
 
 interface ClassSelectorProps {
   labels: ClassLabel[];
-  selected: ClassLabel;
-  counts: Record<ClassLabel, number>;
-  onSelect: (label: ClassLabel) => void;
+  selectedId: string;
+  counts: Record<string, number>;
+  onSelect: (id: string) => void;
+  /** Minimum examples per class before the AI is ready. */
+  minPerClass: number;
 }
 
-export function ClassSelector({ labels, selected, counts, onSelect }: ClassSelectorProps) {
+/**
+ * The list of class buttons (e.g. Circle / Triangle / Square / Star). Shows a
+ * live example count per class and highlights the active one.
+ */
+export default function ClassSelector({
+  labels,
+  selectedId,
+  counts,
+  onSelect,
+  minPerClass,
+}: ClassSelectorProps) {
   return (
-    <div className="panel p-4">
-      <h3 className="font-display text-xl font-semibold">Class Labels</h3>
-      <p className="mt-1 text-sm text-white/70">Pick one label, draw it, then add as example.</p>
-      <div className="mt-3 grid gap-2">
-        {labels.map((label) => {
-          const isSelected = selected === label;
-          return (
-            <button
-              key={label}
-              className={`rounded-xl border px-4 py-3 text-left transition ${
-                isSelected
-                  ? "border-ember-200 bg-ember-500/20 text-white"
-                  : "border-white/20 bg-white/5 hover:bg-white/10"
+    <div className="flex flex-col gap-2" role="radiogroup" aria-label="Choose what to teach">
+      {labels.map((label) => {
+        const count = counts[label.id] ?? 0;
+        const ready = count >= minPerClass;
+        const active = label.id === selectedId;
+        return (
+          <button
+            key={label.id}
+            role="radio"
+            aria-checked={active}
+            onClick={() => onSelect(label.id)}
+            className={`flex items-center justify-between gap-3 rounded-xl border-2 px-4 py-3 text-left transition ${
+              active
+                ? 'border-amd-orange bg-amd-orange/15 shadow-glow-orange'
+                : 'border-amd-line bg-amd-panel/70 hover:border-amd-orange/50'
+            }`}
+          >
+            <span className="flex items-center gap-3">
+              <span className="text-2xl" aria-hidden="true">
+                {label.emoji}
+              </span>
+              <span className="text-lg font-bold">{label.name}</span>
+            </span>
+            <span
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm font-bold ${
+                ready ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amd-panel2 text-slate-300'
               }`}
-              onClick={() => onSelect(label)}
+              title={`${count} example${count === 1 ? '' : 's'} taught`}
             >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold">{label}</span>
-                <span className="rounded-full bg-black/30 px-2 py-1 text-xs">{counts[label] ?? 0} examples</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+              {ready && <span aria-hidden="true">✓</span>}
+              {count}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
