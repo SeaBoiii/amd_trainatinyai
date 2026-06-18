@@ -1,0 +1,45 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@400;500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply m-0 bg-coal-900 font-body text-ice;
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(242, 67, 30, 0.35), transparent 30%),
+    radial-gradient(circle at 85% 15%, rgba(255, 171, 91, 0.18), transparent 28%),
+    linear-gradient(160deg, #06080d 0%, #10151f 55%, #0f1828 100%);
+  min-height: 100vh;
+}
+
+.circuit-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(circle at center, black, transparent 80%);
+}
+
+.panel {
+  @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-panel;
+}
+
+.btn-primary {
+  @apply rounded-xl bg-gradient-to-r from-ember-500 to-orange-400 px-5 py-3 font-semibold text-white transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-ember-200;
+}
+
+.btn-secondary {
+  @apply rounded-xl border border-white/20 bg-white/5 px-4 py-2 font-medium transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-ember-200;
+}
+
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation: none !important;
+  transition: none !important;
+}
