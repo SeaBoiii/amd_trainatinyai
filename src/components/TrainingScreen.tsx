@@ -4,6 +4,7 @@ import MissionInput, { type MissionInputHandle } from './MissionInput';
 import ClassSelector from './ClassSelector';
 import TrainingStats from './TrainingStats';
 import { AICore } from './ui';
+import { supportsAcceleratedModel } from '../utils/shapeModel';
 
 interface TrainingScreenProps {
   mission: Mission;
@@ -14,6 +15,8 @@ interface TrainingScreenProps {
   onAddExample: (label: string, vector: number[]) => void;
   onTrained: () => void;
   onBack: () => void;
+  /** Jump straight to a ready-made pretrained AI demo (Shape Sorter only). */
+  onTryPretrained?: () => void;
 }
 
 const TRAIN_STEPS = [
@@ -37,6 +40,7 @@ export default function TrainingScreen({
   onAddExample,
   onTrained,
   onBack,
+  onTryPretrained,
 }: TrainingScreenProps) {
   const canvasRef = useRef<MissionInputHandle>(null);
   const [feedback, setFeedback] = useState<string>('');
@@ -48,6 +52,8 @@ export default function TrainingScreen({
   const selected = mission.labels.find((l) => l.id === selectedLabel) ?? mission.labels[0];
   const isDraw = mission.inputType === 'draw';
   const actionVerb = isDraw ? 'Draw' : 'Make';
+  const pretrainedAvailable =
+    !!onTryPretrained && supportsAcceleratedModel(mission.labels.map((l) => l.id));
 
   const allReady = useMemo(
     () => mission.labels.every((l) => (counts[l.id] ?? 0) >= minPerClass),
@@ -203,6 +209,27 @@ export default function TrainingScreen({
             <span className="font-bold text-amd-amber">{totalExamples}</span> example
             {totalExamples === 1 ? '' : 's'} so far.
           </p>
+
+          {/* Shortcut: skip teaching and demo the ready-made pretrained model. */}
+          {pretrainedAvailable && (
+            <div className="mt-4 w-full max-w-[340px]">
+              <div className="mb-3 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-500">
+                <span className="h-px flex-1 bg-white/10" />
+                or
+                <span className="h-px flex-1 bg-white/10" />
+              </div>
+              <button
+                onClick={onTryPretrained}
+                className="btn-ghost w-full rounded-2xl py-3 text-base"
+                title="Skip teaching and show a ready-made AI running on your NPU/GPU/CPU"
+              >
+                ⚡ Show the pretrained AI (no teaching needed)
+              </button>
+              <p className="mt-2 text-center text-xs text-slate-400">
+                Great for a quick demo: a real neural network that already knows these four shapes.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

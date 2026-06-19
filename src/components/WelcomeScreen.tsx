@@ -32,15 +32,15 @@ export default function WelcomeScreen({
   }, [reducedMotion]);
 
   return (
-    <div className="relative mx-auto flex min-h-[calc(100vh-64px)] max-w-4xl flex-col items-center justify-center px-4 py-10 text-center">
+    <div className="relative mx-auto flex min-h-screen max-w-4xl flex-col items-center justify-center px-4 py-10 text-center">
       <ChipBadge className="mb-6 animate-fadeUp" />
 
       <div className={`mb-6 ${reducedMotion ? '' : 'animate-floaty'}`}>
         <AICore size={150} active={!reducedMotion} />
       </div>
 
-      <h1 className="animate-fadeUp text-5xl font-black leading-tight sm:text-6xl">
-        Train a <span className="text-gradient">Tiny AI</span>
+      <h1 className="animate-fadeUp text-5xl font-black leading-tight tracking-tight sm:text-6xl">
+        Train a <span className="grad-text">Tiny AI</span>
       </h1>
       <p className="mt-3 max-w-2xl text-lg text-slate-300 sm:text-xl">
         Teach an AI. Test it. See how hardware powers intelligence.
@@ -59,7 +59,7 @@ export default function WelcomeScreen({
       <div className="mt-8 flex w-full max-w-md flex-col gap-3 sm:flex-row sm:justify-center">
         <button
           onClick={onStart}
-          className="btn-primary rounded-2xl px-8 py-5 text-xl"
+          className="btn-primary animate-pulse-ring rounded-2xl px-8 py-5 text-xl"
           autoFocus
         >
           🚀 Start Training
@@ -69,7 +69,7 @@ export default function WelcomeScreen({
         </button>
       </div>
 
-      <div className="mt-10 max-w-xl rounded-2xl border border-amd-line bg-amd-panel/50 px-5 py-4">
+      <div className="mt-10 max-w-xl panel px-5 py-4">
         <p className="text-base text-slate-200">
           <span className="font-bold text-amd-amber">AI learns from data.</span> Hardware helps it
           train and predict faster.

@@ -14,27 +14,31 @@ body,
 
 body {
   margin: 0;
-  background-color: #0a0e14;
+  background-color: #0a0e1a;
   color: #f4f6fb;
-  font-family: 'Segoe UI', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
 }
 
-/* Circuit-board background pattern */
+/* Futuristic circuit-board background (shared with the sibling app) */
 .circuit-bg {
-  background-color: #0a0e14;
+  background-color: #070b16;
   background-image:
-    radial-gradient(circle at 20% 10%, rgba(237, 28, 36, 0.12), transparent 40%),
-    radial-gradient(circle at 85% 30%, rgba(255, 107, 0, 0.12), transparent 42%),
-    linear-gradient(rgba(39, 49, 63, 0.5) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(39, 49, 63, 0.5) 1px, transparent 1px);
+    radial-gradient(circle at 14% 12%, rgba(237, 28, 36, 0.12), transparent 42%),
+    radial-gradient(circle at 86% 8%, rgba(255, 107, 0, 0.12), transparent 42%),
+    radial-gradient(circle at 50% 108%, rgba(255, 107, 0, 0.08), transparent 52%),
+    linear-gradient(rgba(40, 54, 94, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(40, 54, 94, 0.16) 1px, transparent 1px);
   background-size:
-    100% 100%,
-    100% 100%,
-    40px 40px,
-    40px 40px;
+    auto,
+    auto,
+    auto,
+    46px 46px,
+    46px 46px;
+  background-attachment: fixed;
 }
 
 .circuit-bg-animated {
@@ -46,6 +50,25 @@ body {
   background: linear-gradient(160deg, rgba(26, 34, 48, 0.92), rgba(18, 24, 33, 0.92));
   border: 1px solid rgba(39, 49, 63, 0.9);
   backdrop-filter: blur(6px);
+}
+
+/* Shared component-layer primitives (mirrors the sibling app's vocabulary) */
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-white/10 bg-ink-850/70 backdrop-blur-sm;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-200;
+  }
+  .btn-chip {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/10 active:scale-95;
+  }
+  .stat-track {
+    @apply h-2 w-full overflow-hidden rounded-full bg-white/10;
+  }
+  .grad-text {
+    @apply bg-gradient-to-r from-amd-amber via-amd-orange to-amd-red bg-clip-text text-transparent;
+  }
 }
 
 .glow-card-hover {
@@ -117,20 +140,24 @@ body {
   border-radius: 6px;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar (gradient thumb, shared with the sibling app) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 107, 0, 0.5) transparent;
+}
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0a0e14;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #27313f;
-  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(237, 28, 36, 0.6), rgba(255, 107, 0, 0.6));
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #ff6b00;
+  background: linear-gradient(180deg, rgba(237, 28, 36, 0.85), rgba(255, 107, 0, 0.85));
 }
 
 /* Reduced motion: disable decorative animation when toggled or OS-set */

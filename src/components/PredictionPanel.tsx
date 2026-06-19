@@ -70,27 +70,29 @@ export default function PredictionPanel({ result, labels, mission }: PredictionP
       </div>
 
       {/* Nearest examples (show your work) */}
-      <div className="glow-card rounded-2xl p-5">
-        <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-300">
-          Closest examples it compared
-        </h3>
-        <p className="mb-3 text-xs text-slate-400">
-          The AI lined your example up against every example you gave it. These were the most
-          similar.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          {result.neighbors.map((n) => (
-            <NeighborTile
-              key={n.example.id}
-              vector={n.example.vector}
-              labelName={labelMap[n.example.label]?.name ?? n.example.label}
-              emoji={labelMap[n.example.label]?.emoji ?? ''}
-              similarity={n.similarity}
-              mission={mission}
-            />
-          ))}
+      {result.neighbors.length > 0 && (
+        <div className="glow-card rounded-2xl p-5">
+          <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-300">
+            Closest examples it compared
+          </h3>
+          <p className="mb-3 text-xs text-slate-400">
+            The AI lined your example up against every example you gave it. These were the most
+            similar.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {result.neighbors.map((n) => (
+              <NeighborTile
+                key={n.example.id}
+                vector={n.example.vector}
+                labelName={labelMap[n.example.label]?.name ?? n.example.label}
+                emoji={labelMap[n.example.label]?.emoji ?? ''}
+                similarity={n.similarity}
+                mission={mission}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

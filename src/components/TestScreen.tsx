@@ -1,8 +1,14 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Mission, PredictionResult } from '../types';
 import MissionInput, { type MissionInputHandle } from './MissionInput';
 import PredictionPanel from './PredictionPanel';
 import { predict } from '../utils/classifier';
+import {
+  classifyShape,
+  detectAccelerator,
+  supportsAcceleratedModel,
+  type AcceleratorInfo,
+} from '../utils/shapeModel';
 
 interface TestScreenProps {
   mission: Mission;
@@ -12,6 +18,8 @@ interface TestScreenProps {
   onRecordPrediction: (result: PredictionResult) => void;
   onDashboard: () => void;
   onBackToTraining: () => void;
+  /** Start with the pretrained "accelerated" model already enabled (demo path). */
+  defaultAccelerated?: boolean;
 }
 
 type Phase = 'drawing' | 'thinking' | 'result';
@@ -28,6 +36,7 @@ export default function TestScreen({
   onRecordPrediction,
   onDashboard,
   onBackToTraining,
+  defaultAccelerated = false,
 }: TestScreenProps) {
   const canvasRef = useRef<MissionInputHandle>(null);
   const [phase, setPhase] = useState<Phase>('drawing');
@@ -43,6 +52,34 @@ export default function TestScreen({
   const isDraw = mission.inputType === 'draw';
   const actionVerb = isDraw ? 'Draw' : 'Make';
 
+  // ----- Accelerated (pretrained ONNX) mode -----
+  // Only offered for missions whose labels the bundled model actually knows.
+  const acceleratedAvailable = isDraw && supportsAcceleratedModel(labelIds);
+  const [accelerated, setAccelerated] = useState(defaultAccelerated && acceleratedAvailable);
+  const [accel, setAccel] = useState<AcceleratorInfo | null>(null);
+  const [accelStatus, setAccelStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+
+  // When the visitor switches to accelerated mode, find which compute device
+  // (NPU / GPU / CPU) their machine will use.
+  useEffect(() => {
+    if (!accelerated || accel || accelStatus === 'loading') return;
+    let cancelled = false;
+    setAccelStatus('loading');
+    detectAccelerator()
+      .then((info) => {
+        if (!cancelled) {
+          setAccel(info);
+          setAccelStatus('ready');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAccelStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accelerated, accel, accelStatus]);
+
   const handleAsk = () => {
     const vector = canvasRef.current?.getVector();
     if (!vector) {
@@ -56,9 +93,8 @@ export default function TestScreen({
     setWarning('');
     setLastVector(vector);
     setPhase('thinking');
-    // Brief pause so the "comparing" message is visible — feels like real work.
-    setTimeout(() => {
-      const prediction = predict(vector, labelIds, 3);
+
+    const showResult = (prediction: PredictionResult) => {
       setResult(prediction);
       onRecordPrediction(prediction);
       setPhase('result');
@@ -66,6 +102,28 @@ export default function TestScreen({
       setTeachOpen(false);
       setFeedbackMsg('');
       setTaughtMsg('');
+    };
+
+    if (accelerated && acceleratedAvailable) {
+      // Real pretrained neural network running on NPU / GPU / CPU.
+      classifyShape(vector, labelIds)
+        .then((prediction) => {
+          setAccel(prediction.accelerator);
+          setAccelStatus('ready');
+          showResult(prediction);
+        })
+        .catch(() => {
+          setAccelStatus('error');
+          setPhase('drawing');
+          setWarning('The accelerated model could not load. Switch off Accelerated mode to use the model you trained.');
+        });
+      return;
+    }
+
+    // Default: the KNN the visitor trained live. Brief pause so the
+    // "comparing" message is visible — feels like real work.
+    setTimeout(() => {
+      showResult(predict(vector, labelIds, 3));
     }, 850);
   };
 
@@ -90,8 +148,15 @@ export default function TestScreen({
   const handleWrong = () => {
     onFeedback(false);
     setAnswered(true);
-    setTeachOpen(true);
-    setFeedbackMsg('That is okay! AI improves when we give it better data.');
+    if (accelerated) {
+      // The pretrained model is fixed — it doesn't learn from new examples live.
+      setFeedbackMsg(
+        'Good spot! This model was trained ahead of time, so it cannot learn live. Switch off Accelerated mode to teach your own AI.',
+      );
+    } else {
+      setTeachOpen(true);
+      setFeedbackMsg('That is okay! AI improves when we give it better data.');
+    }
   };
 
   const handleTeach = (labelId: string) => {
@@ -121,6 +186,55 @@ export default function TestScreen({
         </button>
       </div>
 
+      {/* Optional accelerated mode: run a real pretrained neural net on the
+          best available compute device (NPU → GPU → CPU). */}
+      {acceleratedAvailable && (
+        <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-white/10 bg-ink-850/60 px-4 py-3 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl" aria-hidden="true">
+              ⚡
+            </span>
+            <div>
+              <p className="text-sm font-bold text-slate-100">Hardware-accelerated AI</p>
+              <p className="text-xs text-slate-400">
+                Run a real pretrained neural network on your{' '}
+                <span className="font-semibold text-amd-amber">NPU</span>, GPU or CPU instead of the
+                model you trained.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {accelerated && (
+              <span className="chip border-amd-orange/40 bg-amd-orange/10 text-amd-amber">
+                {accelStatus === 'loading' && '… detecting device'}
+                {accelStatus === 'ready' && accel && `${accel.emoji} ${accel.label}`}
+                {accelStatus === 'error' && '⚠️ unavailable'}
+                {accelStatus === 'idle' && '…'}
+              </span>
+            )}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={accelerated}
+              onClick={() => setAccelerated((v) => !v)}
+              className={`relative h-7 w-12 rounded-full border transition ${
+                accelerated
+                  ? 'border-amd-orange/60 bg-amd-orange/30'
+                  : 'border-white/15 bg-white/5'
+              }`}
+              title="Toggle hardware-accelerated AI"
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-gradient-to-br from-amd-red to-amd-orange transition-all ${
+                  accelerated ? 'left-6' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Left: input */}
         <div className="flex flex-col items-center">
@@ -147,7 +261,9 @@ export default function TestScreen({
             )}
             {phase === 'thinking' && (
               <p className="rounded-lg bg-amd-orange/15 px-3 py-2 text-sm font-medium text-amd-amber">
-                The AI is comparing your example with the ones you gave it…
+                {accelerated && acceleratedAvailable
+                  ? `Running the neural network on your ${accel?.device ?? 'device'}…`
+                  : 'The AI is comparing your example with the ones you gave it…'}
               </p>
             )}
           </div>
@@ -168,6 +284,12 @@ export default function TestScreen({
             </div>
           ) : (
             <div className="flex flex-col gap-4">
+              {accelerated && accel && (
+                <div className="flex items-center justify-center gap-2 rounded-2xl border border-amd-orange/30 bg-amd-orange/10 px-4 py-2 text-sm font-semibold text-amd-amber">
+                  <span aria-hidden="true">{accel.emoji}</span>
+                  Pretrained neural net · ran on your {accel.device} ({accel.label})
+                </div>
+              )}
               <PredictionPanel result={result} labels={mission.labels} mission={mission} />
 
               {/* Feedback */}

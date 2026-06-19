@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ComponentPropsWithoutRef, ReactNode } from 'react';
 import type {
   CareerMatch,
   Mission,
@@ -20,7 +21,6 @@ import {
   savePrefs,
   type BoothPrefs,
 } from './utils/storage';
-import Header from './components/Header';
 import WelcomeScreen from './components/WelcomeScreen';
 import MissionSelection from './components/MissionSelection';
 import TrainingScreen from './components/TrainingScreen';
@@ -68,6 +68,9 @@ export default function App() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [session, setSession] = useState<SessionState>(() => ({ ...EMPTY_SESSION }));
   const [savedToWall, setSavedToWall] = useState(false);
+  // When true, the Test screen opens with the pretrained model already on
+  // (set by the "Show the pretrained AI" shortcut on the training screen).
+  const [demoPretrained, setDemoPretrained] = useState(false);
 
   const [prefs, setPrefs] = useState<BoothPrefs>(() => loadPrefs());
 
@@ -237,17 +240,40 @@ export default function App() {
   // ----- Render -----
   return (
     <div className="circuit-bg min-h-screen">
-      <Header
-        onHome={goHome}
-        onReset={handleFullReset}
-        presenterMode={prefs.presenterMode}
-        reducedMotion={prefs.reducedMotion}
-        onTogglePresenter={() =>
-          setPrefs((p) => ({ ...p, presenterMode: !p.presenterMode }))
-        }
-        onToggleMotion={() => setPrefs((p) => ({ ...p, reducedMotion: !p.reducedMotion }))}
-        currentScreen={screen}
-      />
+      {/* Floating controls — no persistent top nav, matching the sibling app.
+          Booth toggles stay reachable; Home/Reset appear once past welcome. */}
+      <div className="fixed right-3 top-3 z-50 flex items-center gap-2">
+        {screen !== 'welcome' && (
+          <>
+            <FloatingButton onClick={goHome} title="Back to the start screen">
+              🏠 <span className="hidden sm:inline">Home</span>
+            </FloatingButton>
+            <FloatingButton
+              onClick={handleFullReset}
+              title="Clear everything and start fresh for the next visitor"
+              tone="primary"
+            >
+              🔄 <span className="hidden sm:inline">Reset</span>
+            </FloatingButton>
+          </>
+        )}
+        <FloatingButton
+          onClick={() => setPrefs((p) => ({ ...p, presenterMode: !p.presenterMode }))}
+          title="Presenter Mode: bigger text for the booth"
+          active={prefs.presenterMode}
+          aria-pressed={prefs.presenterMode}
+        >
+          🔎 <span className="hidden md:inline">Presenter</span>
+        </FloatingButton>
+        <FloatingButton
+          onClick={() => setPrefs((p) => ({ ...p, reducedMotion: !p.reducedMotion }))}
+          title="Reduced motion: fewer animations"
+          active={prefs.reducedMotion}
+          aria-pressed={prefs.reducedMotion}
+        >
+          🌙 <span className="hidden md:inline">Calm</span>
+        </FloatingButton>
+      </div>
 
       <main>
         {screen === 'welcome' && (
@@ -268,8 +294,15 @@ export default function App() {
             selectedLabel={selectedLabel}
             onSelectLabel={setSelectedLabel}
             onAddExample={handleAddExample}
-            onTrained={() => setScreen('test')}
+            onTrained={() => {
+              setDemoPretrained(false);
+              setScreen('test');
+            }}
             onBack={() => setScreen('missions')}
+            onTryPretrained={() => {
+              setDemoPretrained(true);
+              setScreen('test');
+            }}
           />
         )}
 
@@ -280,7 +313,11 @@ export default function App() {
             onTeach={handleTeachFromTest}
             onRecordPrediction={handleRecordPrediction}
             onDashboard={() => setScreen('dashboard')}
-            onBackToTraining={() => setScreen('training')}
+            onBackToTraining={() => {
+              setDemoPretrained(false);
+              setScreen('training');
+            }}
+            defaultAccelerated={demoPretrained}
           />
         )}
 
@@ -325,10 +362,40 @@ export default function App() {
         )}
       </main>
 
-      <footer className="border-t border-amd-line/60 px-4 py-4 text-center text-xs text-slate-500">
+      <footer className="border-t border-white/10 px-4 py-4 text-center text-xs text-slate-500">
         Train a Tiny AI · An AMD-inspired compute demo for STEM festivals · Built with React +
         TypeScript · Runs fully in your browser
       </footer>
     </div>
+  );
+}
+
+/** Floating booth control pill. Replaces the old persistent top nav bar. */
+function FloatingButton({
+  children,
+  onClick,
+  title,
+  active = false,
+  tone = 'ghost',
+  ...rest
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  title: string;
+  active?: boolean;
+  tone?: 'ghost' | 'primary';
+} & ComponentPropsWithoutRef<'button'>) {
+  const base =
+    'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold backdrop-blur transition active:scale-95';
+  const styles =
+    tone === 'primary'
+      ? 'border-amd-orange/60 bg-gradient-to-r from-amd-red to-amd-orange text-white shadow-glow-orange hover:brightness-110'
+      : active
+        ? 'border-amd-orange/60 bg-amd-orange/20 text-amd-amber shadow-glow-orange'
+        : 'border-white/15 bg-black/40 text-slate-300 hover:bg-black/60';
+  return (
+    <button type="button" onClick={onClick} title={title} className={`${base} ${styles}`} {...rest}>
+      {children}
+    </button>
   );
 }
